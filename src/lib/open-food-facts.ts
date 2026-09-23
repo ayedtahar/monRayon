@@ -34,7 +34,24 @@ type OffProduct = {
   ingredients_text_fr?: string;
 };
 
-const cache = new Map<string, Promise<OffEnrichment | null>>();
+/**
+ * Open Food Facts est collaboratif : une fiche corrigée doit finir par être
+ * relue. Une absence de correspondance est gardée bien moins longtemps, car
+ * elle peut venir d'un incident réseau autant que d'un produit absent.
+ */
+const CACHE_TTL_MS = {
+  found: 6 * 60 * 60 * 1_000,
+  missing: 10 * 60 * 1_000,
+} as const;
+const CACHE_MAX_ENTRIES = 200;
+
+type CacheEntry = {
+  value: Promise<OffEnrichment | null>;
+  storedAt: number;
+  ttlMs: number;
+};
+
+const cache = new Map<string, CacheEntry>();
 
 function normalizeText(value: string | null | undefined) {
   return (value || "")
@@ -170,11 +187,24 @@ function toEnrichment(
   };
 }
 
+/** Un en-tête HTTP ne transporte pas d'accents de façon fiable. */
+function asciiOnly(value: string) {
+  return value.replace(/[^\x20-\x7e]/g, "").trim();
+}
+
+/**
+ * Open Food Facts demande un User-Agent qui identifie l'application et donne
+ * un moyen de contact, pour pouvoir signaler un usage problématique.
+ */
+const OFF_USER_AGENT = `monRayon/0.1.0 (${
+  asciiOnly(process.env.OPEN_FOOD_FACTS_CONTACT || "") || "contact non renseigne"
+})`;
+
 async function fetchJson(url: string) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "monRayon/0.1.0 (portfolio prototype)",
+      "User-Agent": OFF_USER_AGENT,
     },
     signal: AbortSignal.timeout(7_000),
   });
@@ -233,16 +263,48 @@ async function lookupUncached(product: NormalizedProduct) {
   }
 }
 
-export function lookupOpenFoodFacts(product: NormalizedProduct) {
+/**
+ * `delete` puis `set` aligne l'ordre d'insertion de la Map sur l'ordre
+ * d'usage : l'éviction retire alors les entrées les moins récemment servies.
+ */
+function remember(key: string, entry: CacheEntry) {
+  cache.delete(key);
+  cache.set(key, entry);
+
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+}
+
+export function lookupOpenFoodFacts(product: NormalizedProduct, now = Date.now()) {
   const key = product.barcode || normalizeText(
     `${product.brand || ""} ${product.product_name} ${product.quantity || ""}`,
   );
-  const existing = cache.get(key);
-  if (existing) return existing;
 
-  if (cache.size >= 100) cache.clear();
-  const request = lookupUncached(product);
-  cache.set(key, request);
-  return request;
+  const existing = cache.get(key);
+  if (existing && now - existing.storedAt < existing.ttlMs) {
+    remember(key, existing);
+    return existing.value;
+  }
+
+  const entry: CacheEntry = {
+    value: lookupUncached(product),
+    storedAt: now,
+    ttlMs: CACHE_TTL_MS.found,
+  };
+  // La durée définitive dépend du résultat, connu seulement une fois la
+  // recherche terminée ; l'entrée reste partagée entre-temps pour que deux
+  // produits identiques de la même photo ne déclenchent qu'une requête.
+  void entry.value.then(
+    (result) => {
+      if (!result) entry.ttlMs = CACHE_TTL_MS.missing;
+    },
+    () => {},
+  );
+
+  remember(key, entry);
+  return entry.value;
 }
 
