@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { getDemoAnalysis } from "@/lib/demo";
 import { AppError } from "@/lib/errors";
+import { detectImageFormat, SUPPORTED_IMAGE_FORMATS } from "@/lib/image-format";
 import { logError, logInfo } from "@/lib/logger";
 import { analyzeShelfImage } from "@/lib/pipeline";
 import { BUDGET_KEY, clientKey, getLimiters } from "@/lib/rate-limit";
@@ -11,9 +12,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-// Le client reencode toute photo en JPEG ; les deux autres formats couvrent
-// un envoi direct. Le message d'erreur plus bas liste exactement ces formats.
-const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ACCEPTED_IMAGE_TYPES = new Set<string>(SUPPORTED_IMAGE_FORMATS);
 
 /** Une adresse IP est une donnée personnelle : les logs n'en gardent qu'une empreinte. */
 function anonymise(client: string) {
@@ -126,6 +125,18 @@ export async function POST(request: Request) {
       );
     }
 
+    const bytes = Buffer.from(await image.arrayBuffer());
+    // Le type annoncé vient du client et ne prouve rien : on lit la signature
+    // du fichier avant d'engager le moindre appel facturé.
+    const format = detectImageFormat(bytes);
+    if (!format) {
+      throw new AppError(
+        "unsupported_image",
+        "Ce fichier n’est pas une image JPEG, PNG ou WebP.",
+        415,
+      );
+    }
+
     // Seule une analyse réelle entame le budget : la démonstration ne coûte rien.
     const spend = budget.consume(BUDGET_KEY);
     if (!spend.allowed) {
@@ -141,8 +152,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const bytes = Buffer.from(await image.arrayBuffer());
-    const imageDataUrl = `data:${image.type};base64,${bytes.toString("base64")}`;
+    const imageDataUrl = `data:${format};base64,${bytes.toString("base64")}`;
 
     try {
       const result = await analyzeShelfImage(imageDataUrl);

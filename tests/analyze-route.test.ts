@@ -170,6 +170,30 @@ describe("POST /api/analyze — plafond de budget", () => {
     expect((await second.json()).error.code).toBe("missing_api_key");
   });
 
+  it("rejette un contenu qui n'est pas une image, malgré un type annoncé valide", async () => {
+    const { POST } = await loadRoute(
+      { RATE_LIMIT_MAX: "10", DAILY_ANALYSIS_BUDGET: "1", OPENAI_API_KEY: "test" },
+      async () => VISION_STUB,
+    );
+
+    const body = new FormData();
+    // Un fichier quelconque présenté comme une photo JPEG.
+    body.set(
+      "image",
+      new File([new TextEncoder().encode("GIF89a...")], "rayon.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    const rejected = await POST(
+      new Request("https://exemple.fr/api/analyze", { method: "POST", body }),
+    );
+
+    expect(rejected.status).toBe(415);
+    expect((await rejected.json()).error.code).toBe("unsupported_image");
+    // Le budget n'a pas bougé : une vraie photo passe encore.
+    expect((await POST(photoRequest())).status).toBe(200);
+  });
+
   it("rejette un format non pris en charge sans entamer le budget", async () => {
     const { POST } = await loadRoute(
       { RATE_LIMIT_MAX: "10", DAILY_ANALYSIS_BUDGET: "1", OPENAI_API_KEY: "test" },
