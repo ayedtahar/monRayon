@@ -22,9 +22,10 @@ Le premier périmètre couvre les céréales de petit-déjeuner et une photo rap
 - cadres sur les produits sélectionnés dans la photo ;
 - correction manuelle des prix mal lus, avec reclassement immédiat et sans renvoi de la photo ;
 - limitation de débit par client et plafond d'analyses facturées par déploiement ;
+- installation sur l'écran d'accueil, avec ouverture hors ligne de l'écran de capture ;
 - mode démonstration entièrement local, sans clé API et clairement identifié ;
 - logs serveur simples et erreurs compréhensibles ;
-- 87 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, repli du paramètre `temperature`, contrat HTTP de la route et rendu des écrans concernés.
+- 112 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, repli du paramètre `temperature`, signature des fichiers image, cache Open Food Facts, manifeste d'installation, contrat HTTP de la route et rendu des écrans concernés.
 
 Les quatre marques du mode démo sont fictives. Les résultats réels ne contiennent que les produits détectés dans la photo envoyée.
 
@@ -73,6 +74,12 @@ Trois variables facultatives règlent les garde-fous, avec des valeurs par défa
 RATE_LIMIT_MAX=10
 RATE_LIMIT_WINDOW_SECONDS=300
 DAILY_ANALYSIS_BUDGET=200
+```
+
+Un déploiement public gagne aussi à se déclarer auprès d'Open Food Facts :
+
+```dotenv
+OPEN_FOOD_FACTS_CONTACT=exploitant@exemple.fr
 ```
 
 Une valeur absente ou inexploitable retombe sur la valeur par défaut plutôt que de désactiver la protection.
@@ -203,9 +210,21 @@ Le reclassement est purement local : les compositions ne dépendant pas du prix,
 
 Une recherche exacte par code-barres est privilégiée. Lorsque le code n’est pas visible, l’application recherche par nom, marque et quantité, puis calcule une confiance de correspondance avant tout enrichissement. Une correspondance faible est ignorée.
 
-Les appels sont mis en cache en mémoire et limités au petit nombre de références de la photo. L’API v3 est utilisée pour les codes-barres ; la recherche textuelle utilise l’endpoint historique car la recherche plein texte n’est pas encore disponible dans l’API v3. Voir la [documentation Open Food Facts](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/).
+Les appels sont limités au petit nombre de références de la photo. L’API v3 est utilisée pour les codes-barres ; la recherche textuelle utilise l’endpoint historique car la recherche plein texte n’est pas encore disponible dans l’API v3. Voir la [documentation Open Food Facts](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/).
+
+Les résultats sont gardés en mémoire six heures. La base étant collaborative, une fiche corrigée doit finir par être relue : un cache sans expiration figerait une erreur pour toute la durée de vie du processus. Une recherche infructueuse n’est gardée que dix minutes, car elle peut venir d’un incident réseau autant que d’un produit absent. Le cache est borné et évince les entrées les moins récemment servies.
+
+Open Food Facts demande un User-Agent qui identifie l’application et donne un moyen de contact ; `OPEN_FOOD_FACTS_CONTACT` le renseigne. Sans lui, l’en-tête l’indique explicitement plutôt que de prétendre le contraire.
 
 Open Food Facts est une base collaborative : ses informations peuvent être absentes ou incorrectes. Ses données sont réutilisées selon l’[Open Database License](https://opendatacommons.org/licenses/odbl/).
+
+## Installation sur le téléphone
+
+L’application se déclare installable : un manifeste, des icônes dont une masquable, et un service worker enregistré en production seulement.
+
+Le service worker ne cherche pas à rendre l’analyse disponible hors ligne — elle a besoin du réseau par nature. Il sert à ce que l’application s’ouvre et explique ce qui manque, au lieu d’afficher une page d’erreur du navigateur. Les pages sont servies réseau d’abord, avec repli sur la dernière version connue ; les ressources de build, dont le nom porte une empreinte, viennent du cache. `/api/` n’est jamais mis en cache : un résultat dépend de la photo envoyée et la route est comptabilisée côté serveur.
+
+Les icônes se régénèrent depuis la marque avec `python3 scripts/generate-icons.py`.
 
 ## Limites du MVP
 
@@ -215,6 +234,8 @@ Open Food Facts est une base collaborative : ses informations peuvent être abse
 - Le modèle vision peut varier ou se tromper malgré la sortie structurée. Le classement est déterministe à observations identiques, pas l’extraction de l’image.
 - Les données nutritionnelles manquantes réduisent les catégories disponibles au lieu d’être inventées.
 - Le mode réel nécessite une clé et entraîne un coût variable par image selon le modèle choisi. Open Food Facts ne facture pas l’accès, mais impose des limites de requêtes.
+- Le cache Open Food Facts vit dans le processus : il ne se partage pas entre instances et repart vide à chaque redémarrage.
+- Hors ligne, l’application s’ouvre mais ne peut rien analyser. Seul l’écran de capture a du sens dans cet état.
 - L’analyse réelle par l’API vision n’est pas couverte par les tests automatiques : les tests utilisent une réponse simulée et le mode démo.
 - Les compteurs de débit et de budget vivent en mémoire : ils ne se partagent pas entre instances et repartent de zéro à chaque redémarrage.
 - Un modèle qui refuse `temperature` rend l’extraction un peu moins reproductible : deux analyses de la même photo peuvent différer davantage. Le classement, lui, reste déterministe à observations identiques.
@@ -233,22 +254,26 @@ src/
   lib/price-draft.ts         lecture et validation d’une saisie de prix
   lib/pipeline.ts            orchestration serveur : vision puis enrichissement
   lib/rate-limit.ts          fenêtre glissante, budget et identification du client
+  lib/image-format.ts        signature réelle d’un fichier image
+  app/manifest.ts            manifeste d’installation
+  components/service-worker.tsx  enregistrement du service worker
+public/sw.js                 cache de l’enveloppe, jamais des analyses
+scripts/generate-icons.py    icônes dérivées de la marque
 tests/                       scoring, prix unitaire, contrat vision, Open Food Facts,
-                             corrections, limitation de débit, contrat HTTP
-                             et rendu des écrans
+                             corrections, limitation de débit, signature des images,
+                             manifeste, contrat HTTP et rendu des écrans
 ```
 
 `analysis.ts` et `price-draft.ts` ne dépendent que de fonctions pures : le navigateur rejoue exactement le même classement que le serveur, sans embarquer la moindre ligne de code serveur.
 
 ## Roadmap
 
-1. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain.
+1. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain. **C’est la prochaine étape, et elle demande des photos réelles.**
 2. Recadrer automatiquement les étiquettes de prix avant une seconde lecture OCR.
 3. Évaluer d’autres rayons emballés seulement après validation du périmètre céréales.
-4. Ajouter une PWA installable.
-5. Passer à un compteur partagé le jour d’un déploiement multi-instance.
+4. Passer à un compteur de débit et un cache partagés le jour d’un déploiement multi-instance.
 
-L’écran de correction rapide et les garde-fous de débit et de budget, prévus aux points 2 et 5 de la feuille de route initiale, sont livrés.
+La feuille de route initiale est livrée à l’exception de son premier point : écran de correction rapide, garde-fous de débit et de budget, et installation sur le téléphone.
 
 ## Sources techniques
 
