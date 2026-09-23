@@ -21,9 +21,10 @@ Le premier périmètre couvre les céréales de petit-déjeuner et une photo rap
 - trois recommandations maximum, avec gestion des données inconnues ;
 - cadres sur les produits sélectionnés dans la photo ;
 - correction manuelle des prix mal lus, avec reclassement immédiat et sans renvoi de la photo ;
+- limitation de débit par client et plafond d'analyses facturées par déploiement ;
 - mode démonstration entièrement local, sans clé API et clairement identifié ;
 - logs serveur simples et erreurs compréhensibles ;
-- 57 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix et rendu des écrans concernés.
+- 81 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, contrat HTTP de la route et rendu des écrans concernés.
 
 Les quatre marques du mode démo sont fictives. Les résultats réels ne contiennent que les produits détectés dans la photo envoyée.
 
@@ -65,6 +66,16 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 ```
 
 Le modèle par défaut accepte les images et les sorties structurées. Il peut être remplacé via la variable d’environnement sans modifier le code. Le [mode démonstration](public/demo-shelf.svg) fonctionne sans aucune clé.
+
+Trois variables facultatives règlent les garde-fous, avec des valeurs par défaut utilisables telles quelles :
+
+```dotenv
+RATE_LIMIT_MAX=10
+RATE_LIMIT_WINDOW_SECONDS=300
+DAILY_ANALYSIS_BUDGET=200
+```
+
+Une valeur absente ou inexploitable retombe sur la valeur par défaut plutôt que de désactiver la protection.
 
 ## Lancement
 
@@ -154,6 +165,20 @@ score_qualité_prix = 50 % score_prix + 50 % score_composition
 
 Les égalités sont départagées par la couverture des données, puis par le prix au kilo et enfin par un identifiant stable. Si un même produit gagne plusieurs catégories, une seule carte porte plusieurs badges.
 
+## Limitation de débit et budget
+
+La route `/api/analyze` déclenche un appel vision facturé à chaque photo. Deux garde-fous indépendants l'encadrent, parce qu'ils ne protègent pas de la même chose.
+
+**La limitation par client** refuse plus de `RATE_LIMIT_MAX` requêtes par fenêtre glissante et par adresse. Elle arrête le martèlement trivial. La décision est prise *avant* la lecture du corps de la requête : un envoi de 12 Mo n'est jamais parcouru pour être ensuite refusé. La réponse porte un code 429, un en-tête `Retry-After` et un message qui annonce le délai.
+
+**Le plafond de budget** limite le déploiement entier à `DAILY_ANALYSIS_BUDGET` analyses réelles sur 24 h glissantes. C'est lui qui borne réellement la facture : une limite par adresse ne résiste pas à un afflux distribué. Au-delà, la route répond 503 et renvoie vers la démonstration, qui reste disponible.
+
+Le mode démonstration n'appelle aucune API : il compte pour la limitation de débit, jamais pour le budget. Une analyse qui n'a pas atteint l'API — une clé absente, par exemple — rend son jeton, pour qu'une erreur de configuration n'épuise pas le quota du jour et ne masque pas sa propre cause.
+
+Les journaux ne conservent qu'une empreinte tronquée de l'adresse : une adresse IP est une donnée personnelle et le diagnostic n'a pas besoin de la valeur en clair.
+
+**Ce que ce dispositif ne fait pas.** L'état vit dans la mémoire du processus, conformément au parti pris « ni base de données, ni service tiers ». Sur plusieurs instances, chacune applique la limite de son côté, et le plafond réel devient celui d'une instance multiplié par leur nombre ; un redémarrage remet les compteurs à zéro. Derrière un proxy de confiance, `x-forwarded-for` identifie correctement le client ; en accès direct, l'en-tête est falsifiable et le plafond de budget reste le seul vrai garde-fou. Un déploiement multi-instance demandera un compteur partagé, que la forme actuelle du code permet de substituer sans toucher à la route.
+
 ## Correction des prix
 
 La lecture d’une étiquette est le maillon le plus fragile de la chaîne. Un prix confondu avec celui du produit voisin fausse le classement entier sans que rien ne le signale.
@@ -181,7 +206,7 @@ Open Food Facts est une base collaborative : ses informations peuvent être abse
 - Les données nutritionnelles manquantes réduisent les catégories disponibles au lieu d’être inventées.
 - Le mode réel nécessite une clé et entraîne un coût variable par image selon le modèle choisi. Open Food Facts ne facture pas l’accès, mais impose des limites de requêtes.
 - L’analyse réelle par l’API vision n’est pas couverte par les tests automatiques : les tests utilisent une réponse simulée et le mode démo.
-- La route `/api/analyze` n’est ni limitée en débit ni plafonnée en budget : chaque requête déclenche un appel vision facturé. À traiter avant toute mise en ligne publique.
+- Les compteurs de débit et de budget vivent en mémoire : ils ne se partagent pas entre instances et repartent de zéro à chaque redémarrage.
 - `temperature: 0` est envoyé à l’API vision. Le paramètre convient aux modèles `gpt-4.1`, mais certains modèles plus récents le refusent : changer `OPENAI_VISION_MODEL` peut demander un ajustement dans `src/lib/vision.ts`.
 
 ## Structure du projet
@@ -197,21 +222,23 @@ src/
   lib/analysis.ts            assemblage du résultat et rejeu des corrections
   lib/price-draft.ts         lecture et validation d’une saisie de prix
   lib/pipeline.ts            orchestration serveur : vision puis enrichissement
+  lib/rate-limit.ts          fenêtre glissante, budget et identification du client
 tests/                       scoring, prix unitaire, contrat vision, Open Food Facts,
-                             corrections et rendu des écrans
+                             corrections, limitation de débit, contrat HTTP
+                             et rendu des écrans
 ```
 
 `analysis.ts` et `price-draft.ts` ne dépendent que de fonctions pures : le navigateur rejoue exactement le même classement que le serveur, sans embarquer la moindre ligne de code serveur.
 
 ## Roadmap
 
-1. Limiter le débit de `/api/analyze` et plafonner le budget par déploiement, avant toute mise en ligne publique.
-2. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain.
-3. Recadrer automatiquement les étiquettes de prix avant une seconde lecture OCR.
-4. Évaluer d’autres rayons emballés seulement après validation du périmètre céréales.
-5. Ajouter une PWA installable.
+1. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain.
+2. Recadrer automatiquement les étiquettes de prix avant une seconde lecture OCR.
+3. Évaluer d’autres rayons emballés seulement après validation du périmètre céréales.
+4. Ajouter une PWA installable.
+5. Passer à un compteur partagé le jour d’un déploiement multi-instance.
 
-L’écran de correction rapide, prévu au point 2 de la feuille de route initiale, est livré.
+L’écran de correction rapide et les garde-fous de débit et de budget, prévus aux points 2 et 5 de la feuille de route initiale, sont livrés.
 
 ## Sources techniques
 
