@@ -1,6 +1,9 @@
 import type {
+  IdentificationSource,
   NormalizedProduct,
+  NutritionSource,
   OffEnrichment,
+  PriceSource,
   ProductAnalysis,
   ProductScores,
   Recommendation,
@@ -33,6 +36,10 @@ const NUTRI_SCORE_VALUES = {
 
 type EnrichedProduct = NormalizedProduct & {
   off: OffEnrichment | null;
+  /** Renseignées par buildAnalysisResult ; déduites de `off` sinon. */
+  price_source?: PriceSource;
+  identification_source?: IdentificationSource;
+  nutrition_source?: NutritionSource;
 };
 
 function clampScore(value: number) {
@@ -130,9 +137,12 @@ export function scoreProducts(products: EnrichedProduct[]): ProductAnalysis[] {
       ...product,
       scores,
       sources: {
-        identification: product.off ? "open_food_facts" : "vision",
-        price: "vision",
-        nutrition: product.off ? "open_food_facts" : null,
+        identification:
+          product.identification_source ??
+          (product.off ? "open_food_facts" : "vision"),
+        price: product.price_source ?? "vision",
+        nutrition:
+          product.nutrition_source ?? (product.off ? "open_food_facts" : null),
       },
     };
   });

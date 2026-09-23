@@ -68,14 +68,33 @@ export type ProductScores = {
   composition_eligible: boolean;
 };
 
+export type IdentificationSource = "vision" | "open_food_facts" | "demo";
+/** "user" signale un prix saisi par la personne, qui fait autorité sur la lecture. */
+export type PriceSource = "vision" | "demo" | "user";
+export type NutritionSource = "open_food_facts" | "demo" | null;
+
 export type ProductAnalysis = NormalizedProduct & {
   off: OffEnrichment | null;
   scores: ProductScores;
   sources: {
-    identification: "vision" | "open_food_facts" | "demo";
-    price: "vision" | "demo";
-    nutrition: "open_food_facts" | "demo" | null;
+    identification: IdentificationSource;
+    price: PriceSource;
+    nutrition: NutritionSource;
   };
+};
+
+/** Un produit et sa composition voyagent ensemble, jamais dans deux tableaux parallèles. */
+export type AnalysisInput = {
+  product: DetectedProduct;
+  off: OffEnrichment | null;
+  corrected?: boolean;
+};
+
+export type PriceCorrection = {
+  product_id: string;
+  price: number | null;
+  quantity_amount: number | null;
+  quantity_unit: DetectedProduct["quantity_unit"];
 };
 
 export type RecommendationKind =
@@ -98,5 +117,6 @@ export type AnalysisResult = {
     detected_products: number;
     enriched_products: number;
     duration_ms: number;
+    products_to_review: number;
   };
 };

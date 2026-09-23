@@ -800,3 +800,211 @@ button {
 
   .scan-line { animation: none; top: 50%; }
 }
+
+/* ---------- Vérification des prix ---------- */
+
+.results-footer .button + .button { margin-top: 0.7rem; }
+
+.review-callout {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.85rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid #ead39c;
+  border-left: 0.28rem solid #f2bd4c;
+  border-radius: 0.9rem;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.review-callout:hover { background: #fffaf0; }
+.review-callout:active { transform: scale(0.99); }
+
+.review-callout > span:nth-child(2) {
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.review-callout strong {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.review-callout-icon {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--green-dark);
+  background: #f2bd4c;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.review-callout-arrow {
+  flex: none;
+  color: var(--green);
+  font-size: 1.1rem;
+}
+
+.review-step {
+  flex: 1;
+  padding: clamp(1.5rem, 5vh, 3rem) 0 2rem;
+}
+
+.review-list {
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+  list-style: none;
+}
+
+.review-row {
+  padding: 0.9rem;
+  background: var(--surface);
+  border: 1px solid rgba(23, 79, 52, 0.11);
+  border-radius: 1rem;
+  box-shadow: 0 5px 18px rgba(28, 53, 37, 0.05);
+}
+
+.review-row-flagged { border-color: #ead39c; background: #fffaf0; }
+
+.review-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.review-thumb {
+  width: 3rem;
+  height: 3.5rem;
+  flex: none;
+  background-color: #e7e5da;
+  background-repeat: no-repeat;
+  border-radius: 0.55rem;
+}
+
+.review-identity {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.45rem;
+}
+
+.review-identity strong {
+  width: 100%;
+  overflow-wrap: anywhere;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.review-identity > span:not(.review-flag) {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.review-flag {
+  padding: 0.15rem 0.4rem;
+  color: #725323;
+  background: #fff4d9;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.review-flag-done {
+  color: var(--green-dark);
+  background: var(--lime);
+}
+
+.review-fields {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 0.6rem;
+}
+
+.review-field label {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--muted);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+}
+
+.review-input {
+  display: flex;
+  align-items: stretch;
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+  border-radius: 0.7rem;
+  overflow: hidden;
+}
+
+.review-input:focus-within { border-color: var(--green); }
+
+.review-input input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.6rem 0.55rem;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.review-input input:focus { outline: none; }
+.review-input input[aria-invalid="true"] { color: #a33a2b; }
+
+.review-input > span {
+  padding: 0.6rem 0.55rem 0.6rem 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.review-input select {
+  padding: 0 0.5rem;
+  color: var(--green-dark);
+  background: rgba(23, 79, 52, 0.06);
+  border: 0;
+  border-left: 1.5px solid var(--line);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.review-input select:focus { outline: 2px solid var(--green); outline-offset: -2px; }
+
+.review-error {
+  margin: 0.55rem 0 0;
+  color: #a33a2b;
+  font-size: 0.68rem;
+}
+
+.review-hint {
+  margin: 1rem 0 1.25rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}

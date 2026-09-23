@@ -20,9 +20,10 @@ Le premier périmètre couvre les céréales de petit-déjeuner et une photo rap
 - scoring déterministe et explicable ;
 - trois recommandations maximum, avec gestion des données inconnues ;
 - cadres sur les produits sélectionnés dans la photo ;
+- correction manuelle des prix mal lus, avec reclassement immédiat et sans renvoi de la photo ;
 - mode démonstration entièrement local, sans clé API et clairement identifié ;
 - logs serveur simples et erreurs compréhensibles ;
-- tests unitaires du scoring et du prix unitaire.
+- 57 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix et rendu des écrans concernés.
 
 Les quatre marques du mode démo sont fictives. Les résultats réels ne contiennent que les produits détectés dans la photo envoyée.
 
@@ -36,11 +37,14 @@ flowchart LR
     D --> E[Open Food Facts<br>si correspondance fiable]
     E --> F[Scoring TypeScript<br>déterministe]
     F --> A
+    A -->|prix corrigé par l'utilisateur| F
 ```
 
 Un seul projet Next.js contient l’interface et la route serveur. Il n’y a ni base de données, ni compte, ni microservice. La clé OpenAI reste côté serveur. La photo n’est envoyée qu’après un appui sur « Analyser cette photo ».
 
 Le modèle vision observe l’image et remplit un schéma JSON. Il ne décide jamais du classement final. Le code recalcule notamment le prix au kg à partir du prix du paquet et de la quantité dès que ces deux valeurs sont disponibles.
+
+Chaque produit voyage avec sa propre composition Open Food Facts, jamais dans deux tableaux appariés par position : un produit écarté en cours de route ne peut pas décaler les compositions des autres.
 
 ## Installation
 
@@ -150,6 +154,16 @@ score_qualité_prix = 50 % score_prix + 50 % score_composition
 
 Les égalités sont départagées par la couverture des données, puis par le prix au kilo et enfin par un identifiant stable. Si un même produit gagne plusieurs catégories, une seule carte porte plusieurs badges.
 
+## Correction des prix
+
+La lecture d’une étiquette est le maillon le plus fragile de la chaîne. Un prix confondu avec celui du produit voisin fausse le classement entier sans que rien ne le signale.
+
+L’écran de vérification affiche donc chaque produit détecté avec un gros plan découpé dans la photo, son prix et sa contenance modifiables. Un produit est signalé pour vérification quand le prix manque, quand la contenance ne permet aucun calcul au kilo, ou quand la confiance de lecture ou d’association tombe sous 0,75 — un seuil volontairement plus exigeant que celui du scoring, pour couvrir aussi les lectures acceptées mais douteuses.
+
+Une saisie fait autorité : la confiance passe à 1, l’origine du prix devient `user` et le produit n’est plus signalé. Le prix au kilo est alors recalculé depuis la saisie et jamais repris de l’étiquette lue précédemment. Un prix donné sans contenance sort le produit de la comparaison des prix plutôt que d’inventer une quantité.
+
+Le reclassement est purement local : les compositions ne dépendant pas du prix, aucune photo n’est renvoyée et aucun appel n’est refait.
+
 ## Open Food Facts
 
 Une recherche exacte par code-barres est privilégiée. Lorsque le code n’est pas visible, l’application recherche par nom, marque et quantité, puis calcule une confiance de correspondance avant tout enrichissement. Une correspondance faible est ignorée.
@@ -161,34 +175,43 @@ Open Food Facts est une base collaborative : ses informations peuvent être abse
 ## Limites du MVP
 
 - Une photo de rayon complet contient souvent des textes trop petits. Le MVP demande un cadrage de 3 à 8 produits.
-- La relation prix-produit reste le point le plus fragile : une étiquette décalée ou une promotion par lot peut créer une ambiguïté.
+- La relation prix-produit reste le point le plus fragile : une étiquette décalée ou une promotion par lot peut créer une ambiguïté. L’écran de correction limite les dégâts mais ne remplace pas une lecture fiable.
 - Un code-barres est rarement visible de face. La correspondance Open Food Facts par nom, marque et quantité est moins sûre qu’une lecture du code.
 - Le modèle vision peut varier ou se tromper malgré la sortie structurée. Le classement est déterministe à observations identiques, pas l’extraction de l’image.
 - Les données nutritionnelles manquantes réduisent les catégories disponibles au lieu d’être inventées.
 - Le mode réel nécessite une clé et entraîne un coût variable par image selon le modèle choisi. Open Food Facts ne facture pas l’accès, mais impose des limites de requêtes.
 - L’analyse réelle par l’API vision n’est pas couverte par les tests automatiques : les tests utilisent une réponse simulée et le mode démo.
+- La route `/api/analyze` n’est ni limitée en débit ni plafonnée en budget : chaque requête déclenche un appel vision facturé. À traiter avant toute mise en ligne publique.
+- `temperature: 0` est envoyé à l’API vision. Le paramètre convient aux modèles `gpt-4.1`, mais certains modèles plus récents le refusent : changer `OPENAI_VISION_MODEL` peut demander un ajustement dans `src/lib/vision.ts`.
 
 ## Structure du projet
 
 ```text
 src/
   app/api/analyze/route.ts   route serveur et erreurs HTTP
-  components/photo-flow.tsx parcours mobile complet
+  components/photo-flow.tsx  parcours mobile complet, correction comprise
   lib/vision.ts              extraction JSON depuis l’image
   lib/open-food-facts.ts     recherche et correspondance produit
   lib/units.ts               calcul du prix par unité
   lib/scoring.ts             scores et sélection des gagnants
-  lib/pipeline.ts            orchestration du traitement
-tests/                       scoring, prix unitaire et contrat vision
+  lib/analysis.ts            assemblage du résultat et rejeu des corrections
+  lib/price-draft.ts         lecture et validation d’une saisie de prix
+  lib/pipeline.ts            orchestration serveur : vision puis enrichissement
+tests/                       scoring, prix unitaire, contrat vision, Open Food Facts,
+                             corrections et rendu des écrans
 ```
+
+`analysis.ts` et `price-draft.ts` ne dépendent que de fonctions pures : le navigateur rejoue exactement le même classement que le serveur, sans embarquer la moindre ligne de code serveur.
 
 ## Roadmap
 
-1. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit.
-2. Ajouter un écran de correction rapide lorsqu’une association est incertaine.
+1. Limiter le débit de `/api/analyze` et plafonner le budget par déploiement, avant toute mise en ligne publique.
+2. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain.
 3. Recadrer automatiquement les étiquettes de prix avant une seconde lecture OCR.
 4. Évaluer d’autres rayons emballés seulement après validation du périmètre céréales.
-5. Ajouter une PWA installable et un budget d’usage par déploiement.
+5. Ajouter une PWA installable.
+
+L’écran de correction rapide, prévu au point 2 de la feuille de route initiale, est livré.
 
 ## Sources techniques
 

@@ -9,12 +9,9 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-const ACCEPTED_IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-]);
+// Le client reencode toute photo en JPEG ; les deux autres formats couvrent
+// un envoi direct. Le message d'erreur plus bas liste exactement ces formats.
+const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function errorResponse(error: unknown, requestId: string) {
   if (error instanceof AppError) {

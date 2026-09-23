@@ -2,15 +2,32 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { applyPriceCorrections, needsPriceReview } from "@/lib/analysis";
 import { prepareImageForAnalysis } from "@/lib/client-image";
+import {
+  differsFrom,
+  readDraft,
+  toDraft,
+  UNIT_OPTIONS,
+  type Draft,
+  type FieldErrors,
+} from "@/lib/price-draft";
 import type {
   AnalysisResult,
+  BoundingBox,
+  PriceCorrection,
   ProductAnalysis,
   Recommendation,
   RecommendationKind,
 } from "@/lib/types";
 
-type Stage = "capture" | "preview" | "analyzing" | "results" | "error";
+type Stage =
+  | "capture"
+  | "preview"
+  | "analyzing"
+  | "results"
+  | "review"
+  | "error";
 
 type Photo = {
   file: File | null;
@@ -323,14 +340,16 @@ function ResultCard({
   );
 }
 
-function ResultsScreen({
+export function ResultsScreen({
   result,
   photo,
   onReset,
+  onReview,
 }: {
   result: AnalysisResult;
   photo: Photo;
   onReset: () => void;
+  onReview: () => void;
 }) {
   const recommendationEntries = result.recommendations.flatMap((recommendation) => {
     const product = result.products.find(
@@ -407,6 +426,24 @@ function ResultsScreen({
         </div>
       )}
 
+      {result.meta.products_to_review > 0 && (
+        <button className="review-callout" type="button" onClick={onReview}>
+          <span className="review-callout-icon" aria-hidden="true">
+            ?
+          </span>
+          <span>
+            <strong>
+              {result.meta.products_to_review} prix à vérifier
+            </strong>
+            Une étiquette mal lue fausse tout le classement. Corrigez-la en dix
+            secondes.
+          </span>
+          <span className="review-callout-arrow" aria-hidden="true">
+            →
+          </span>
+        </button>
+      )}
+
       {result.warnings.length > 0 && (
         <div className="warnings" role="status">
           {result.warnings.map((warning) => (
@@ -419,12 +456,245 @@ function ResultsScreen({
         <button className="button button-primary" type="button" onClick={onReset}>
           Analyser un autre rayon
         </button>
+        {result.products.length > 0 && (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onReview}
+          >
+            Corriger les prix lus
+          </button>
+        )}
         <p>
           {result.mode === "demo"
             ? "Produits et données fictifs pour démonstration."
             : "Données nutritionnelles : Open Food Facts, lorsqu’une correspondance fiable existe."}
         </p>
       </div>
+    </section>
+  );
+}
+
+/**
+ * Découpe la photo sur le cadre du produit, pour que la personne voie de quel
+ * paquet on parle sans avoir à relire toute l'image.
+ */
+function cropStyle(url: string, box: BoundingBox): React.CSSProperties {
+  const offset = (position: number, size: number) =>
+    size >= 1 ? 50 : Math.min(100, Math.max(0, (position / (1 - size)) * 100));
+
+  return {
+    backgroundImage: `url("${url}")`,
+    backgroundSize: `${100 / box.width}% ${100 / box.height}%`,
+    backgroundPosition: `${offset(box.x, box.width)}% ${offset(box.y, box.height)}%`,
+  };
+}
+
+function ReviewRow({
+  product,
+  draft,
+  errors,
+  flagged,
+  photoUrl,
+  onChange,
+}: {
+  product: ProductAnalysis;
+  draft: Draft;
+  errors: FieldErrors;
+  flagged: boolean;
+  photoUrl: string;
+  onChange: (draft: Draft) => void;
+}) {
+  const priceId = `price-${product.id}`;
+  const amountId = `amount-${product.id}`;
+  const unitId = `unit-${product.id}`;
+
+  return (
+    <li className={`review-row${flagged ? " review-row-flagged" : ""}`}>
+      <div className="review-row-head">
+        <span
+          className="review-thumb"
+          style={cropStyle(photoUrl, product.bounding_box)}
+          role="img"
+          aria-label={`Vue rapprochée de ${product.product_name}`}
+        />
+        <div className="review-identity">
+          <strong>{product.product_name}</strong>
+          <span>{product.brand || "Marque inconnue"}</span>
+          {flagged && (
+            <span className="review-flag">Lecture incertaine</span>
+          )}
+          {product.sources.price === "user" && (
+            <span className="review-flag review-flag-done">Prix confirmé</span>
+          )}
+        </div>
+      </div>
+
+      <div className="review-fields">
+        <div className="review-field">
+          <label htmlFor={priceId}>Prix du paquet</label>
+          <div className="review-input">
+            <input
+              id={priceId}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="—"
+              value={draft.price}
+              aria-invalid={Boolean(errors.price)}
+              onChange={(event) =>
+                onChange({ ...draft, price: event.target.value })
+              }
+            />
+            <span aria-hidden="true">€</span>
+          </div>
+        </div>
+
+        <div className="review-field">
+          <label htmlFor={amountId}>Contenance</label>
+          <div className="review-input">
+            <input
+              id={amountId}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="—"
+              value={draft.amount}
+              aria-invalid={Boolean(errors.quantity)}
+              onChange={(event) =>
+                onChange({ ...draft, amount: event.target.value })
+              }
+            />
+            <select
+              id={unitId}
+              aria-label="Unité de contenance"
+              value={draft.unit}
+              onChange={(event) =>
+                onChange({ ...draft, unit: event.target.value })
+              }
+            >
+              <option value="">unité ?</option>
+              {UNIT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {(errors.price || errors.quantity) && (
+        <p className="review-error" role="alert">
+          {errors.price || errors.quantity}
+        </p>
+      )}
+    </li>
+  );
+}
+
+export function ReviewScreen({
+  result,
+  photo,
+  onApply,
+  onCancel,
+}: {
+  result: AnalysisResult;
+  photo: Photo;
+  onApply: (corrections: PriceCorrection[]) => void;
+  onCancel: () => void;
+}) {
+  const flagged = useMemo(
+    () => new Set(result.products.filter(needsPriceReview).map((item) => item.id)),
+    [result.products],
+  );
+  // Les lectures douteuses remontent en tête, sans perdre l'ordre du rayon.
+  const ordered = useMemo(
+    () =>
+      [...result.products].sort(
+        (a, b) => Number(flagged.has(b.id)) - Number(flagged.has(a.id)),
+      ),
+    [result.products, flagged],
+  );
+
+  const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
+    Object.fromEntries(result.products.map((item) => [item.id, toDraft(item)])),
+  );
+
+  const rows = ordered.map((product) => {
+    const draft = drafts[product.id] ?? toDraft(product);
+    return { product, draft, ...readDraft(draft) };
+  });
+
+  const invalidCount = rows.filter((row) => !row.valid).length;
+  const changedCount = rows.filter(
+    (row) => row.valid && differsFrom(row.product, row.correction),
+  ).length;
+
+  function submit() {
+    if (invalidCount > 0) return;
+    onApply(
+      rows
+        .filter((row) => differsFrom(row.product, row.correction))
+        .map((row) => ({ product_id: row.product.id, ...row.correction })),
+    );
+  }
+
+  return (
+    <section className="review-step" aria-labelledby="review-title">
+      <div className="step-heading">
+        <div className="eyebrow-row">
+          <p className="eyebrow">Vérification</p>
+          {result.mode === "demo" && <span className="mode-chip">Démo</span>}
+        </div>
+        <h1 id="review-title">Ces prix sont-ils les bons&nbsp;?</h1>
+        <p>
+          Corrigez ce qui a été mal lu. Le classement est recalculé aussitôt,
+          sans renvoyer la photo.
+        </p>
+      </div>
+
+      <ul className="review-list">
+        {rows.map((row) => (
+          <ReviewRow
+            key={row.product.id}
+            product={row.product}
+            draft={row.draft}
+            errors={row.errors}
+            flagged={flagged.has(row.product.id)}
+            photoUrl={photo.url}
+            onChange={(draft) =>
+              setDrafts((current) => ({ ...current, [row.product.id]: draft }))
+            }
+          />
+        ))}
+      </ul>
+
+      <p className="review-hint">
+        Laissez un champ vide si la donnée est inconnue. Sans contenance, le
+        prix au kilo ne peut pas être calculé et le produit sort de la
+        comparaison des prix.
+      </p>
+
+      <div className="action-stack">
+        <button
+          className="button button-primary"
+          type="button"
+          onClick={submit}
+          disabled={invalidCount > 0}
+        >
+          {changedCount > 0
+            ? `Recalculer avec ${changedCount} correction${changedCount > 1 ? "s" : ""}`
+            : "Revenir aux résultats"}
+        </button>
+        <button className="button button-ghost" type="button" onClick={onCancel}>
+          Annuler
+        </button>
+      </div>
+
+      {invalidCount > 0 && (
+        <p className="error-message" role="alert">
+          Corrigez la saisie signalée avant de recalculer.
+        </p>
+      )}
     </section>
   );
 }
@@ -516,6 +786,16 @@ export function PhotoFlow() {
     setStage("preview");
   }
 
+  /** Le recalcul est local : les compositions déjà récupérées restent valables. */
+  function applyCorrections(corrections: PriceCorrection[]) {
+    if (corrections.length) {
+      setResult((current) =>
+        current ? applyPriceCorrections(current, corrections) : current,
+      );
+    }
+    setStage("results");
+  }
+
   function reset() {
     setPhoto(null);
     setResult(null);
@@ -588,7 +868,20 @@ export function PhotoFlow() {
       )}
       {stage === "analyzing" && photo && <LoadingScreen photo={photo} />}
       {stage === "results" && photo && result && (
-        <ResultsScreen result={result} photo={photo} onReset={reset} />
+        <ResultsScreen
+          result={result}
+          photo={photo}
+          onReset={reset}
+          onReview={() => setStage("review")}
+        />
+      )}
+      {stage === "review" && photo && result && (
+        <ReviewScreen
+          result={result}
+          photo={photo}
+          onApply={applyCorrections}
+          onCancel={() => setStage("results")}
+        />
       )}
       {stage === "error" && photo && (
         <ErrorScreen
