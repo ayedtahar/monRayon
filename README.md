@@ -24,7 +24,7 @@ Le premier périmètre couvre les céréales de petit-déjeuner et une photo rap
 - limitation de débit par client et plafond d'analyses facturées par déploiement ;
 - mode démonstration entièrement local, sans clé API et clairement identifié ;
 - logs serveur simples et erreurs compréhensibles ;
-- 81 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, contrat HTTP de la route et rendu des écrans concernés.
+- 87 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, repli du paramètre `temperature`, contrat HTTP de la route et rendu des écrans concernés.
 
 Les quatre marques du mode démo sont fictives. Les résultats réels ne contiennent que les produits détectés dans la photo envoyée.
 
@@ -65,7 +65,7 @@ OPENAI_API_KEY=...
 OPENAI_VISION_MODEL=gpt-4.1-mini
 ```
 
-Le modèle par défaut accepte les images et les sorties structurées. Il peut être remplacé via la variable d’environnement sans modifier le code. Le [mode démonstration](public/demo-shelf.svg) fonctionne sans aucune clé.
+Le modèle par défaut accepte les images et les sorties structurées. Il peut être remplacé via la variable d’environnement sans modifier le code, y compris par un modèle qui refuse tout réglage d’échantillonnage : voir [Changer de modèle](#changer-de-modèle). Le [mode démonstration](public/demo-shelf.svg) fonctionne sans aucune clé.
 
 Trois variables facultatives règlent les garde-fous, avec des valeurs par défaut utilisables telles quelles :
 
@@ -165,6 +165,16 @@ score_qualité_prix = 50 % score_prix + 50 % score_composition
 
 Les égalités sont départagées par la couverture des données, puis par le prix au kilo et enfin par un identifiant stable. Si un même produit gagne plusieurs catégories, une seule carte porte plusieurs badges.
 
+## Changer de modèle
+
+`OPENAI_VISION_MODEL` suffit à changer de modèle. Encore faut-il que le reste de la requête lui convienne : `temperature: 0` sert à rendre l’extraction aussi reproductible que possible, mais certains modèles refusent tout réglage d’échantillonnage et rejettent la requête entière.
+
+Tenir une liste de noms de modèles vieillirait à chaque nouvelle sortie. L’application tente donc la requête avec `temperature`, et si l’API rejette précisément ce paramètre, elle la rejoue sans lui. Le refus est reconnu sur le champ `param` de l’erreur, ou à défaut sur un message qui nomme `temperature` — un refus pour une autre raison n’entraîne aucun second essai.
+
+Le résultat est mémorisé par modèle : l’aller-retour supplémentaire n’a lieu qu’une fois par modèle et par processus. Il coûte de toute façon peu, le rejet étant une validation de paramètre qui ne consomme aucun jeton. Les deux tentatives partagent un seul budget de temps, pour que le second essai ne fasse pas dépasser la durée maximale de la route.
+
+Le repli est tracé dans les journaux (`vision.temperature_unsupported`) : perdre le réglage d’échantillonnage change la reproductibilité de l’extraction, cela ne doit pas se produire en silence.
+
 ## Limitation de débit et budget
 
 La route `/api/analyze` déclenche un appel vision facturé à chaque photo. Deux garde-fous indépendants l'encadrent, parce qu'ils ne protègent pas de la même chose.
@@ -207,7 +217,7 @@ Open Food Facts est une base collaborative : ses informations peuvent être abse
 - Le mode réel nécessite une clé et entraîne un coût variable par image selon le modèle choisi. Open Food Facts ne facture pas l’accès, mais impose des limites de requêtes.
 - L’analyse réelle par l’API vision n’est pas couverte par les tests automatiques : les tests utilisent une réponse simulée et le mode démo.
 - Les compteurs de débit et de budget vivent en mémoire : ils ne se partagent pas entre instances et repartent de zéro à chaque redémarrage.
-- `temperature: 0` est envoyé à l’API vision. Le paramètre convient aux modèles `gpt-4.1`, mais certains modèles plus récents le refusent : changer `OPENAI_VISION_MODEL` peut demander un ajustement dans `src/lib/vision.ts`.
+- Un modèle qui refuse `temperature` rend l’extraction un peu moins reproductible : deux analyses de la même photo peuvent différer davantage. Le classement, lui, reste déterministe à observations identiques.
 
 ## Structure du projet
 

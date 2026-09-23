@@ -1,4 +1,5 @@
 import { AppError } from "./errors";
+import { logInfo } from "./logger";
 import { visionResultSchema, type VisionResult } from "./types";
 
 const PRODUCT_SCHEMA = {
@@ -92,8 +93,19 @@ Règles impératives :
 - Les confiances sont comprises entre 0 et 1.
 - Identifie les produits dans l'ordre gauche-droite, haut-bas avec des ids product-1, product-2, etc.`;
 
+const DEFAULT_VISION_MODEL = "gpt-4.1-mini";
+const VISION_TIMEOUT_MS = 55_000;
+
+/**
+ * Certains modèles refusent tout réglage d'échantillonnage. Tenir une liste de
+ * noms vieillirait à chaque sortie de modèle : on tente donc avec
+ * `temperature`, on retire le paramètre si l'API le rejette, et on s'en
+ * souvient pour ne payer cet aller-retour qu'une fois par modèle.
+ */
+const modelsRejectingTemperature = new Set<string>();
+
 type OpenAiResponse = {
-  error?: { message?: string };
+  error?: { message?: string; param?: string; code?: string };
   output_text?: string;
   output?: Array<{
     type?: string;
@@ -128,18 +140,25 @@ function extractOutputText(response: OpenAiResponse) {
   );
 }
 
-export async function detectShelfProducts(
-  imageDataUrl: string,
-): Promise<VisionResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new AppError(
-      "missing_api_key",
-      "L’analyse réelle n’est pas configurée. Ajoutez OPENAI_API_KEY ou utilisez la photo de démonstration.",
-      503,
-    );
-  }
+/** Reconnaît un refus portant précisément sur `temperature`, et rien d'autre. */
+function isTemperatureRejection(status: number, body: OpenAiResponse) {
+  if (status !== 400 || !body.error) return false;
+  if (body.error.param === "temperature") return true;
 
+  const message = body.error.message?.toLowerCase() ?? "";
+  return (
+    message.includes("temperature") &&
+    (message.includes("unsupported") || message.includes("not supported"))
+  );
+}
+
+async function requestVision(
+  model: string,
+  apiKey: string,
+  imageDataUrl: string,
+  withTemperature: boolean,
+  deadline: number,
+) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -147,9 +166,9 @@ export async function detectShelfProducts(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini",
+      model,
       store: false,
-      temperature: 0,
+      ...(withTemperature ? { temperature: 0 } : {}),
       max_output_tokens: 4_000,
       input: [
         {
@@ -169,10 +188,57 @@ export async function detectShelfProducts(
         },
       },
     }),
-    signal: AbortSignal.timeout(55_000),
+    // Les deux tentatives partagent un seul budget de temps, pour que le
+    // second essai ne fasse pas dépasser la durée maximale de la route.
+    signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())),
   });
 
   const body = (await response.json().catch(() => ({}))) as OpenAiResponse;
+  return { response, body };
+}
+
+export async function detectShelfProducts(
+  imageDataUrl: string,
+): Promise<VisionResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new AppError(
+      "missing_api_key",
+      "L’analyse réelle n’est pas configurée. Ajoutez OPENAI_API_KEY ou utilisez la photo de démonstration.",
+      503,
+    );
+  }
+
+  const model = process.env.OPENAI_VISION_MODEL || DEFAULT_VISION_MODEL;
+  const deadline = Date.now() + VISION_TIMEOUT_MS;
+  const withTemperature = !modelsRejectingTemperature.has(model);
+
+  let { response, body } = await requestVision(
+    model,
+    apiKey,
+    imageDataUrl,
+    withTemperature,
+    deadline,
+  );
+
+  if (
+    !response.ok &&
+    withTemperature &&
+    isTemperatureRejection(response.status, body)
+  ) {
+    // Ce modèle ne laisse pas régler l’échantillonnage : l’extraction devient
+    // un peu moins reproductible, le classement reste déterministe.
+    logInfo("vision.temperature_unsupported", { model });
+    modelsRejectingTemperature.add(model);
+    ({ response, body } = await requestVision(
+      model,
+      apiKey,
+      imageDataUrl,
+      false,
+      deadline,
+    ));
+  }
+
   if (!response.ok) {
     throw new AppError(
       "vision_api_error",

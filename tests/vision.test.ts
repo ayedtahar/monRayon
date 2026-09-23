@@ -1,6 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-import { detectShelfProducts } from "../src/lib/vision";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const validVisionPayload = {
   products: [
@@ -25,40 +23,79 @@ const validVisionPayload = {
   ],
 };
 
+function okResponse() {
+  return new Response(
+    JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: [
+            { type: "output_text", text: JSON.stringify(validVisionPayload) },
+          ],
+        },
+      ],
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+function errorResponse(
+  status: number,
+  error: { message?: string; param?: string; code?: string },
+) {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** Ce que renvoie l'API quand le modèle n'accepte aucun réglage d'échantillonnage. */
+function temperatureRejection(options: { withParam?: boolean } = {}) {
+  return errorResponse(400, {
+    message: "Unsupported parameter: 'temperature' is not supported with this model.",
+    param: options.withParam === false ? undefined : "temperature",
+    code: "unsupported_parameter",
+  });
+}
+
+/** Chaque test repart d'un module neuf : la mémoire des modèles est globale. */
+async function loadVision() {
+  vi.resetModules();
+  return (await import("../src/lib/vision")).detectShelfProducts;
+}
+
+function queueResponses(...responses: Response[]) {
+  const fetchMock = vi.fn();
+  for (const response of responses) fetchMock.mockResolvedValueOnce(response);
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function sentBody(fetchMock: ReturnType<typeof vi.fn>, call: number) {
+  return JSON.parse(fetchMock.mock.calls[call][1].body as string);
+}
+
+beforeEach(() => {
+  vi.spyOn(console, "info").mockImplementation(() => {});
+  vi.stubEnv("OPENAI_API_KEY", "test-key");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("detectShelfProducts", () => {
   it("envoie l'image et demande une sortie JSON structurée", async () => {
-    vi.stubEnv("OPENAI_API_KEY", "test-key");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          output: [
-            {
-              type: "message",
-              content: [
-                {
-                  type: "output_text",
-                  text: JSON.stringify(validVisionPayload),
-                },
-              ],
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = queueResponses(okResponse());
+    const detect = await loadVision();
 
-    const result = await detectShelfProducts("data:image/jpeg;base64,abc");
-    expect(result).toEqual(validVisionPayload);
+    expect(await detect("data:image/jpeg;base64,abc")).toEqual(validVisionPayload);
 
-    const [, options] = fetchMock.mock.calls[0];
-    const body = JSON.parse(options.body as string);
+    const body = sentBody(fetchMock, 0);
     expect(body.store).toBe(false);
+    expect(body.temperature).toBe(0);
     expect(body.input[0].content[1]).toMatchObject({
       type: "input_image",
       image_url: "data:image/jpeg;base64,abc",
@@ -73,8 +110,98 @@ describe("detectShelfProducts", () => {
 
   it("refuse l'analyse réelle sans clé serveur", async () => {
     vi.stubEnv("OPENAI_API_KEY", "");
-    await expect(
-      detectShelfProducts("data:image/jpeg;base64,abc"),
-    ).rejects.toMatchObject({ code: "missing_api_key", status: 503 });
+    const detect = await loadVision();
+
+    await expect(detect("data:image/jpeg;base64,abc")).rejects.toMatchObject({
+      code: "missing_api_key",
+      status: 503,
+    });
+  });
+});
+
+describe("detectShelfProducts — modèle refusant temperature", () => {
+  it("réessaie sans le paramètre et rend le résultat", async () => {
+    const fetchMock = queueResponses(temperatureRejection(), okResponse());
+    const detect = await loadVision();
+
+    expect(await detect("data:image/jpeg;base64,abc")).toEqual(validVisionPayload);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sentBody(fetchMock, 0).temperature).toBe(0);
+    expect(sentBody(fetchMock, 1)).not.toHaveProperty("temperature");
+  });
+
+  it("reconnaît le refus même sans champ param", async () => {
+    const fetchMock = queueResponses(
+      temperatureRejection({ withParam: false }),
+      okResponse(),
+    );
+    const detect = await loadVision();
+
+    await detect("data:image/jpeg;base64,abc");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("s'en souvient et n'envoie plus qu'une requête pour ce modèle", async () => {
+    vi.stubEnv("OPENAI_VISION_MODEL", "modele-sans-temperature");
+    const fetchMock = queueResponses(
+      temperatureRejection(),
+      okResponse(),
+      okResponse(),
+    );
+    const detect = await loadVision();
+
+    await detect("data:image/jpeg;base64,abc");
+    await detect("data:image/jpeg;base64,def");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sentBody(fetchMock, 2)).not.toHaveProperty("temperature");
+  });
+
+  it("n'applique cette mémoire qu'au modèle concerné", async () => {
+    vi.stubEnv("OPENAI_VISION_MODEL", "modele-sans-temperature");
+    const fetchMock = queueResponses(
+      temperatureRejection(),
+      okResponse(),
+      okResponse(),
+    );
+    const detect = await loadVision();
+    await detect("data:image/jpeg;base64,abc");
+
+    vi.stubEnv("OPENAI_VISION_MODEL", "autre-modele");
+    await detect("data:image/jpeg;base64,def");
+
+    expect(sentBody(fetchMock, 2).temperature).toBe(0);
+  });
+
+  it("ne réessaie pas sur un refus sans rapport", async () => {
+    const fetchMock = queueResponses(
+      errorResponse(400, {
+        message: "Invalid image data.",
+        param: "input",
+        code: "invalid_value",
+      }),
+    );
+    const detect = await loadVision();
+
+    await expect(detect("data:image/jpeg;base64,abc")).rejects.toMatchObject({
+      code: "vision_api_error",
+      status: 422,
+      message: "Invalid image data.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ne réessaie jamais deux fois", async () => {
+    const fetchMock = queueResponses(
+      temperatureRejection(),
+      errorResponse(500, { message: "Le service est indisponible." }),
+    );
+    const detect = await loadVision();
+
+    await expect(detect("data:image/jpeg;base64,abc")).rejects.toMatchObject({
+      code: "vision_api_error",
+      status: 502,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
