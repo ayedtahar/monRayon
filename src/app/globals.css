@@ -1008,3 +1008,24 @@ button {
   font-size: 0.68rem;
   line-height: 1.45;
 }
+
+/* ---------- Attente longue ---------- */
+
+.analysis-elapsed {
+  margin: 1.1rem 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.analysis-slow {
+  margin: 0.6rem 0 0;
+  padding: 0.7rem 0.8rem;
+  color: #725323;
+  background: #fff4d9;
+  border: 1px solid #ead39c;
+  border-radius: 0.8rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}

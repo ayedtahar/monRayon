@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ResultsScreen, ReviewScreen } from "@/components/photo-flow";
+import {
+  analysisProgress,
+  LoadingScreen,
+  ResultsScreen,
+  ReviewScreen,
+} from "@/components/photo-flow";
 import { buildAnalysisResult } from "@/lib/analysis";
 import type { AnalysisResult, DetectedProduct } from "@/lib/types";
 
@@ -154,5 +159,43 @@ describe("ResultsScreen", () => {
 
     expect(html).not.toContain("review-callout");
     expect(html).toContain("Corriger les prix lus");
+  });
+});
+
+describe("LoadingScreen", () => {
+  it("suit l'ordre du traitement en s'espaçant dans le temps", () => {
+    expect(analysisProgress(0).activeStep).toBe(0);
+    expect(analysisProgress(2).activeStep).toBe(0);
+    expect(analysisProgress(3).activeStep).toBe(1);
+    expect(analysisProgress(13).activeStep).toBe(2);
+    expect(analysisProgress(14).activeStep).toBe(3);
+  });
+
+  it("reste sur la dernière étape sans la dépasser", () => {
+    expect(analysisProgress(600).activeStep).toBe(3);
+  });
+
+  it("ne signale une attente longue qu'au-delà du seuil", () => {
+    expect(analysisProgress(24).slow).toBe(false);
+    expect(analysisProgress(25).slow).toBe(true);
+  });
+
+  it("démarre sur la première étape, sans compteur annoncé ni alerte", () => {
+    const html = renderToStaticMarkup(
+      <LoadingScreen
+        photo={{
+          file: null,
+          url: "/demo-shelf.svg",
+          name: "rayon",
+          demo: true,
+          objectUrl: false,
+        }}
+      />,
+    );
+
+    expect(html).toContain("Lecture des produits visibles");
+    expect(html).toContain('class="step-active"');
+    expect(html).toContain('aria-hidden="true">0 s</p>');
+    expect(html).not.toContain("plus long que d’habitude");
   });
 });

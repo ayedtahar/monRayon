@@ -199,24 +199,45 @@ function PreviewScreen({
   );
 }
 
-function LoadingScreen({ photo }: { photo: Photo }) {
-  const steps = useMemo(
-    () => [
-      "Lecture des produits visibles",
-      "Association des prix",
-      "Recherche des compositions",
-      "Calcul des trois choix",
-    ],
-    [],
-  );
-  const [activeStep, setActiveStep] = useState(0);
+/**
+ * L'avancement réel côté serveur n'est pas observable depuis le navigateur.
+ * Ces étapes suivent donc l'ordre du traitement, pas son avancement exact, et
+ * s'espacent au fil du temps plutôt que de se figer au bout de cinq secondes.
+ */
+const ANALYSIS_STEPS = [
+  { label: "Lecture des produits visibles", startsAt: 0 },
+  { label: "Association des prix", startsAt: 3 },
+  { label: "Recherche des compositions", startsAt: 8 },
+  { label: "Calcul des trois choix", startsAt: 14 },
+] as const;
+
+/** Au-delà, mieux vaut le dire que laisser croire à un blocage. */
+const SLOW_ANALYSIS_SECONDS = 25;
+
+export function analysisProgress(elapsedSeconds: number) {
+  return {
+    activeStep: ANALYSIS_STEPS.reduce(
+      (current, step, index) => (elapsedSeconds >= step.startsAt ? index : current),
+      0,
+    ),
+    slow: elapsedSeconds >= SLOW_ANALYSIS_SECONDS,
+  };
+}
+
+export function LoadingScreen({ photo }: { photo: Photo }) {
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
+    // Mesuré sur l'horloge plutôt qu'en comptant les tics : un onglet mis en
+    // arrière-plan ralentit les minuteurs sans ralentir l'analyse.
+    const startedAt = Date.now();
     const interval = window.setInterval(() => {
-      setActiveStep((current) => Math.min(current + 1, steps.length - 1));
-    }, 1_250);
+      setElapsed(Math.round((Date.now() - startedAt) / 1_000));
+    }, 1_000);
     return () => window.clearInterval(interval);
-  }, [steps.length]);
+  }, []);
+
+  const { activeStep, slow } = analysisProgress(elapsed);
 
   return (
     <section className="loading-step" aria-live="polite" aria-labelledby="loading-title">
@@ -228,9 +249,9 @@ function LoadingScreen({ photo }: { photo: Photo }) {
       <p className="eyebrow">Analyse en cours</p>
       <h1 id="loading-title">On regarde le rayon.</h1>
       <ol className="analysis-steps">
-        {steps.map((step, index) => (
+        {ANALYSIS_STEPS.map((step, index) => (
           <li
-            key={step}
+            key={step.label}
             className={
               index < activeStep
                 ? "step-complete"
@@ -240,10 +261,21 @@ function LoadingScreen({ photo }: { photo: Photo }) {
             }
           >
             <span>{index < activeStep ? "✓" : index + 1}</span>
-            {step}
+            {step.label}
           </li>
         ))}
       </ol>
+      {/* Masqué aux lecteurs d'écran : la région est annoncée à chaque
+          changement, et un compteur de secondes la rendrait bavarde. */}
+      <p className="analysis-elapsed" aria-hidden="true">
+        {elapsed} s
+      </p>
+      {slow && (
+        <p className="analysis-slow">
+          C’est plus long que d’habitude. On attend toujours la réponse du
+          service d’analyse.
+        </p>
+      )}
     </section>
   );
 }
