@@ -106,6 +106,15 @@ npm run lint
 npm run build
 ```
 
+Les crochets git qui interdisent la fuite d'un secret s'activent une fois par
+clone, en une commande :
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Voir [Secrets](#secrets).
+
 ## Données produites
 
 Chaque produit détecté conserve les observations et leurs niveaux de confiance :
@@ -218,6 +227,31 @@ Open Food Facts demande un User-Agent qui identifie l’application et donne un 
 
 Open Food Facts est une base collaborative : ses informations peuvent être absentes ou incorrectes. Ses données sont réutilisées selon l’[Open Database License](https://opendatacommons.org/licenses/odbl/).
 
+## Secrets
+
+La clé OpenAI vaut de l'argent réel, et une clé poussée sur une forge publique
+est moissonnée en quelques secondes. Trois contrôles cumulés s'exécutent avant
+chaque commit et avant chaque push, depuis [`scripts/check-secrets.sh`](scripts/check-secrets.sh) :
+
+1. **aucun fichier d'environnement suivi**, à la seule exception de
+   `.env.example`. `.gitignore` les couvre déjà, mais `git add -f` passe outre ;
+2. **détection par motifs de préfixe** — `sk-`, `ghp_`, `AKIA`, `glpat-`,
+   clés privées… — toujours exécutée ;
+3. **gitleaks** en supplément, quand il est installé.
+
+Les deux derniers se complètent plutôt qu'ils ne se doublent, et l'expérience
+l'a montré : la règle OpenAI de gitleaks exige le marqueur `T3BlbkFJ` que
+portent les clés classiques, si bien qu'une clé `sk-proj-` d'une autre forme
+lui échappe alors que le motif de préfixe l'attrape. À l'inverse, gitleaks
+couvre des dizaines de fournisseurs et mesure l'entropie, hors de portée d'un
+`grep`.
+
+Aucune valeur détectée n'est affichée : un secret ne doit pas fuiter une
+seconde fois dans un journal de console.
+
+Sans gitleaks installé, les contrôles 1 et 2 s'exécutent quand même et le
+préviennent. Le crochet ne s'ouvre jamais en grand faute d'outil.
+
 ## Formats de photo
 
 La route n'accepte que JPEG, PNG et WebP, parce que ce sont les formats que l'API vision sait lire. Un format courant sur les téléphones mais qu'elle ignore — AVIF, HEIC — n'a donc pas sa place dans cette liste : l'accepter ferait échouer l'appel plus loin, après avoir consommé le budget.
@@ -264,6 +298,8 @@ src/
   lib/rate-limit.ts          fenêtre glissante, budget et identification du client
   lib/image-format.ts        signature réelle d’un fichier image
   lib/errors.ts              erreurs serveur, et messages destinés à l’écran
+scripts/check-secrets.sh     contrôle anti-fuite, partagé par les deux crochets
+.githooks/                   crochets pre-commit et pre-push
   app/manifest.ts            manifeste d’installation
   components/service-worker.tsx  enregistrement du service worker
 public/sw.js                 cache de l’enveloppe, jamais des analyses

@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Dernier filet avant l'envoi vers un serveur distant : verifie les commits
+# reellement pousses, y compris ceux commites avant l'installation du hook.
+set -e
+ROOT=$(git rev-parse --show-toplevel)
+VIDE=0000000000000000000000000000000000000000
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$VIDE" ] && continue          # suppression de branche
+  if [ "$remote_sha" = "$VIDE" ]; then
+    # Branche nouvelle : on verifie tout ce qu'elle apporte.
+    base=$(git rev-list --max-parents=0 "$local_sha" | tail -1)
+    "$ROOT/scripts/check-secrets.sh" --range "$base^" "$local_sha" 2>/dev/null \
+      || "$ROOT/scripts/check-secrets.sh" --all
+  else
+    "$ROOT/scripts/check-secrets.sh" --range "$remote_sha" "$local_sha"
+  fi
+done

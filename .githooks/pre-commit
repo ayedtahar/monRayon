@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Bloque un secret avant qu'il n'entre dans l'historique.
+# Reecrire l'historique apres coup est bien plus couteux, et une cle poussee
+# est compromise meme apres suppression.
+exec "$(git rev-parse --show-toplevel)/scripts/check-secrets.sh" --staged
