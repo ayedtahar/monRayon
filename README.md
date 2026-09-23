@@ -321,6 +321,19 @@ docs/fixtures/               photos de rayon et leur vérité terrain
 
 La feuille de route initiale est livrée à l’exception de son premier point : écran de correction rapide, garde-fous de débit et de budget, et installation sur le téléphone.
 
+## Licence
+
+Le code est publié sous licence **MIT** (voir [`LICENSE`](LICENSE)).
+
+Les trois photographies de [`docs/fixtures/`](docs/fixtures/README.md) n'en
+relèvent pas : elles sont sous **CC BY-SA 4.0** et appartiennent à leurs
+auteurs, cités dans le README du dossier. Les réutiliser impose de citer
+l'auteur et de conserver la licence. Elles servent de matériel de test et ne
+font pas partie de l'application distribuée.
+
+Les données nutritionnelles proviennent d'Open Food Facts, sous
+[Open Database License](https://opendatacommons.org/licenses/odbl/).
+
 ## Sources techniques
 
 - [Entrées image et limites des modèles vision](https://developers.openai.com/api/docs/guides/images-vision)
