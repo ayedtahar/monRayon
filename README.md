@@ -271,13 +271,14 @@ scripts/generate-icons.py    icônes dérivées de la marque
 tests/                       scoring, prix unitaire, contrat vision, Open Food Facts,
                              corrections, limitation de débit, signature des images,
                              manifeste, contrat HTTP et rendu des écrans
+docs/fixtures/               photos de rayon et leur vérité terrain
 ```
 
 `analysis.ts` et `price-draft.ts` ne dépendent que de fonctions pures : le navigateur rejoue exactement le même classement que le serveur, sans embarquer la moindre ligne de code serveur.
 
 ## Roadmap
 
-1. Constituer un petit jeu de photos réelles de céréales et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain. **C’est la prochaine étape, et elle demande des photos réelles.**
+1. Étoffer le jeu d’évaluation et mesurer précision, rappel et association prix-produit — en se servant des corrections saisies comme vérité terrain. Trois photos et leur vérité terrain sont réunies dans [`docs/fixtures/`](docs/fixtures/README.md) ; il manque des photos prises en rayon de céréales français.
 2. Recadrer automatiquement les étiquettes de prix avant une seconde lecture OCR.
 3. Évaluer d’autres rayons emballés seulement après validation du périmètre céréales.
 4. Passer à un compteur de débit et un cache partagés le jour d’un déploiement multi-instance.
