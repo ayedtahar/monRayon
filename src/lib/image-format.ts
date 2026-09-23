@@ -1,6 +1,12 @@
 /**
  * Formats réellement acceptés par l'analyse. Le client reencode toute photo en
  * JPEG ; PNG et WebP couvrent un envoi direct.
+ *
+ * Cette liste suit ce que l'API vision sait lire, et rien d'autre. Un format
+ * que le téléphone produit couramment mais qu'elle ignore — AVIF, HEIC —
+ * n'a donc pas sa place ici : l'ajouter ferait échouer l'appel plus loin,
+ * après avoir consommé le budget. Ces photos passent par la conversion en
+ * JPEG du navigateur, dans `client-image.ts`.
  */
 export const SUPPORTED_IMAGE_FORMATS = ["image/jpeg", "image/png", "image/webp"] as const;
 

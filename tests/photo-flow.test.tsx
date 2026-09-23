@@ -2,11 +2,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  analysisErrorMessage,
   analysisProgress,
   LoadingScreen,
   ResultsScreen,
   ReviewScreen,
 } from "@/components/photo-flow";
+import { DisplayableError } from "@/lib/errors";
 import { buildAnalysisResult } from "@/lib/analysis";
 import type { AnalysisResult, DetectedProduct } from "@/lib/types";
 
@@ -197,5 +199,43 @@ describe("LoadingScreen", () => {
     expect(html).toContain('class="step-active"');
     expect(html).toContain('aria-hidden="true">0 s</p>');
     expect(html).not.toContain("plus long que d’habitude");
+  });
+});
+
+describe("analysisErrorMessage", () => {
+  it("explique un abandon pour cause de lenteur", () => {
+    expect(
+      analysisErrorMessage(new DOMException("aborted", "AbortError")),
+    ).toContain("trop de temps");
+  });
+
+  it("affiche tel quel un message écrit pour être lu", () => {
+    expect(
+      analysisErrorMessage(new DisplayableError("La photo dépasse 20 Mo.")),
+    ).toBe("La photo dépasse 20 Mo.");
+  });
+
+  it("n'expose jamais le texte d'un bogue de programmation", () => {
+    const message = analysisErrorMessage(
+      new TypeError("Cannot read properties of null (reading 'drawImage')"),
+    );
+
+    expect(message).toBe("Une erreur inattendue est survenue.");
+    expect(message).not.toContain("drawImage");
+  });
+
+  it("n'expose pas davantage un code technique interne", () => {
+    // Le cas qui se produisait : un format que le navigateur ne sait pas
+    // décoder remontait la chaîne « image_decode_failed » jusqu'à l'écran.
+    const message = analysisErrorMessage(new Error("image_decode_failed"));
+
+    expect(message).toBe("Une erreur inattendue est survenue.");
+    expect(message).not.toContain("image_decode_failed");
+  });
+
+  it("gère ce qui n'est même pas une erreur", () => {
+    expect(analysisErrorMessage("boom")).toBe(
+      "Une erreur inattendue est survenue.",
+    );
   });
 });

@@ -1,3 +1,5 @@
+import { DisplayableError } from "./errors";
+
 const MAX_DIMENSION = 2_000;
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 
@@ -5,14 +7,21 @@ function loadImage(url: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("image_decode_failed"));
+    // Un navigateur qui ne sait pas décoder le format — AVIF ou HEIC selon
+    // les versions — échoue ici. Le message doit dire quoi faire.
+    image.onerror = () =>
+      reject(
+        new DisplayableError(
+          "Ce format d’image n’a pas pu être ouvert. Prenez la photo avec l’appareil, ou enregistrez-la en JPEG.",
+        ),
+      );
     image.src = url;
   });
 }
 
 export async function prepareImageForAnalysis(file: File) {
   if (file.size > MAX_SOURCE_BYTES) {
-    throw new Error("La photo dépasse 20 Mo.");
+    throw new DisplayableError("La photo dépasse 20 Mo.");
   }
 
   const sourceUrl = URL.createObjectURL(file);
@@ -25,13 +34,15 @@ export async function prepareImageForAnalysis(file: File) {
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Impossible de préparer la photo.");
+    if (!context) {
+      throw new DisplayableError("Impossible de préparer la photo.");
+    }
     context.drawImage(image, 0, 0, width, height);
 
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", 0.86),
     );
-    if (!blob) throw new Error("Impossible de convertir la photo.");
+    if (!blob) throw new DisplayableError("Impossible de convertir la photo.");
     return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "rayon"}.jpg`, {
       type: "image/jpeg",
     });

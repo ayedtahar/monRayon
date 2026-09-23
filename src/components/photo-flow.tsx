@@ -4,6 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { applyPriceCorrections, needsPriceReview } from "@/lib/analysis";
 import { prepareImageForAnalysis } from "@/lib/client-image";
+import { DisplayableError } from "@/lib/errors";
 import {
   differsFrom,
   readDraft,
@@ -210,6 +211,19 @@ const ANALYSIS_STEPS = [
   { label: "Recherche des compositions", startsAt: 8 },
   { label: "Calcul des trois choix", startsAt: 14 },
 ] as const;
+
+/**
+ * N'affiche que des messages écrits pour être lus. Un bogue de programmation
+ * ou une panne inattendue reste derrière une formule générique : son texte
+ * technique n'aiderait personne devant un rayon.
+ */
+export function analysisErrorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "L’analyse a pris trop de temps. Réessayez avec une photo plus rapprochée.";
+  }
+  if (error instanceof DisplayableError) return error.message;
+  return "Une erreur inattendue est survenue.";
+}
 
 /** Au-delà, mieux vaut le dire que laisser croire à un blocage. */
 const SLOW_ANALYSIS_SECONDS = 25;
@@ -862,23 +876,18 @@ export function PhotoFlow() {
         | null;
 
       if (!response.ok) {
+        // Les messages d'erreur de la route sont rédigés pour être lus.
         const message =
-          payload && "error" in payload
-            ? payload.error?.message
-            : "L’analyse est momentanément indisponible.";
-        throw new Error(message || "L’analyse est momentanément indisponible.");
+          payload && "error" in payload ? payload.error?.message : null;
+        throw new DisplayableError(
+          message || "L’analyse est momentanément indisponible.",
+        );
       }
 
       setResult(payload as AnalysisResult);
       setStage("results");
     } catch (analysisError) {
-      const message =
-        analysisError instanceof DOMException && analysisError.name === "AbortError"
-          ? "L’analyse a pris trop de temps. Réessayez avec une photo plus rapprochée."
-          : analysisError instanceof Error
-            ? analysisError.message
-            : "Une erreur inattendue est survenue.";
-      setError(message);
+      setError(analysisErrorMessage(analysisError));
       setStage("error");
     } finally {
       window.clearTimeout(timeout);

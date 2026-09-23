@@ -25,7 +25,7 @@ Le premier périmètre couvre les céréales de petit-déjeuner et une photo rap
 - installation sur l'écran d'accueil, avec ouverture hors ligne de l'écran de capture ;
 - mode démonstration entièrement local, sans clé API et clairement identifié ;
 - logs serveur simples et erreurs compréhensibles ;
-- 112 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, repli du paramètre `temperature`, signature des fichiers image, cache Open Food Facts, manifeste d'installation, contrat HTTP de la route et rendu des écrans concernés.
+- 117 tests unitaires : scoring, prix unitaire, contrat vision, correspondance Open Food Facts, correction des prix, limitation de débit, repli du paramètre `temperature`, signature des fichiers image, messages d'erreur affichés, cache Open Food Facts, manifeste d'installation, contrat HTTP de la route et rendu des écrans concernés.
 
 Les quatre marques du mode démo sont fictives. Les résultats réels ne contiennent que les produits détectés dans la photo envoyée.
 
@@ -218,6 +218,14 @@ Open Food Facts demande un User-Agent qui identifie l’application et donne un 
 
 Open Food Facts est une base collaborative : ses informations peuvent être absentes ou incorrectes. Ses données sont réutilisées selon l’[Open Database License](https://opendatacommons.org/licenses/odbl/).
 
+## Formats de photo
+
+La route n'accepte que JPEG, PNG et WebP, parce que ce sont les formats que l'API vision sait lire. Un format courant sur les téléphones mais qu'elle ignore — AVIF, HEIC — n'a donc pas sa place dans cette liste : l'accepter ferait échouer l'appel plus loin, après avoir consommé le budget.
+
+Ces photos ne sont pas perdues pour autant : le navigateur les réencode en JPEG avant l'envoi, dans `client-image.ts`. Le chemin normal, depuis la photothèque du téléphone, fonctionne donc avec ce que l'appareil produit. Seul un envoi direct à l'API se heurte à la liste.
+
+Lorsque le navigateur lui-même ne sait pas décoder le fichier, l'écran l'explique et propose de reprendre la photo avec l'appareil.
+
 ## Installation sur le téléphone
 
 L’application se déclare installable : un manifeste, des icônes dont une masquable, et un service worker enregistré en production seulement.
@@ -255,6 +263,7 @@ src/
   lib/pipeline.ts            orchestration serveur : vision puis enrichissement
   lib/rate-limit.ts          fenêtre glissante, budget et identification du client
   lib/image-format.ts        signature réelle d’un fichier image
+  lib/errors.ts              erreurs serveur, et messages destinés à l’écran
   app/manifest.ts            manifeste d’installation
   components/service-worker.tsx  enregistrement du service worker
 public/sw.js                 cache de l’enveloppe, jamais des analyses
