@@ -1,5 +1,11 @@
 # monRayon
 
+> **English summary.** monRayon is a mobile web MVP for choosing among packaged food products
+> on a French supermarket shelf. Photograph a few products with their price labels and it
+> returns at most three picks: best price, best value and best ingredients. A vision model
+> reads the photo, Open Food Facts adds the composition, and deterministic TypeScript does the
+> ranking. First scope: breakfast cereals. A demo mode runs locally without an API key.
+
 > Trop de choix dans le rayon ? Une photo, trois choix.
 
 monRayon est un MVP mobile pour choisir parmi les produits alimentaires emballés visibles dans un rayon de supermarché français. L’utilisateur photographie quelques produits avec leurs étiquettes de prix ; l’application répond avec trois recommandations maximum : **meilleur prix**, **meilleur compromis qualité/prix** et **meilleure composition**.
